@@ -2,10 +2,15 @@
 import fcntl
 import time
 import unittest
+import subprocess
+import threading
+import json
 
 from BaseHTTPServer import BaseHTTPRequestHandler,HTTPServer
 
 PORT_NUMBER = 8080
+#TEMPERATURE = "0"
+#HUMIDITY = "0"
 
 class SHT21:
     """Class to read temperature and humidity from SHT21, much of class was 
@@ -90,7 +95,7 @@ class SHT21:
     def _get_temperature_from_buffer(data):
         """This function reads the first two bytes of data and
         returns the temperature in C by using the following function:
-        T = -46.85 + (175.72 * (ST/2^16))
+        T = =46.82 + (172.72 * (ST/2^16))
         where ST is the value from the sensor
         """
         unadjusted = (ord(data[0]) << 8) + ord(data[1])
@@ -135,16 +140,37 @@ class SHT21Test(unittest.TestCase):
         self.failUnless(SHT21._calculate_checksum([chr(99), chr(172)], 2) == 249)
         self.failUnless(SHT21._calculate_checksum([chr(99), chr(160)], 2) == 132)
 
+def publish():
+    global temperature
+    global humidity
+    while True:
+	temperature = str(SHT21(1).read_temperature())
+	humidity = str(SHT21(1).read_humidity())
+        data = json.dumps({"temperature":temperature,"humidity":humidity}) 
+    	print "publishing " + str(data)
+	subprocess.call(["mosquitto_pub", "-t", "mirror/roomClimate", "-m", data])
+	time.sleep(1)
+
 if __name__ == "__main__":
     try:
-        with SHT21(0) as sht21:
+        with SHT21(1) as sht21:
             #print "Temperature: %s" % sht21.read_temperature()
             #print "Humidity: %s" % sht21.read_humidity()
-            print str(sht21.read_temperature())+","+str(sht21.read_humidity())
+	    temp = str(sht21.read_temperature())+","+str(sht21.read_humidity())
+	    #while True:
+            	#print "TEST"
+		#time.sleep(10)
+            #print temp
+	    #subprocess.call(["mosquitto_pub", "-t", "mirror/roomClimate", "-m", temp])
+	    publisherThread = threading.Thread(target=publish)
+	    publisherThread.start()
     except IOError, e:
         print e
         print "Error creating connection to i2c.  This must be run as root"
 
+
+#This class will handles any incoming request from
+#the browser 
 class myHandler(BaseHTTPRequestHandler):
     
     #Handler for the GET requests
@@ -155,8 +181,9 @@ class myHandler(BaseHTTPRequestHandler):
         # Send the html message
 
         #self.wfile.write("Hello World !")
-        self.wfile.write(str(SHT21(1).read_temperature())+","+str(SHT21(1).read_humidity()))
-        return
+        #self.wfile.write(str(SHT21(1).read_temperature())+","+str(SHT21(1).read_humidity()))
+        self.wfile.write(temperature+","+humidity)
+	return
 
 try:
     #Create a web server and define the handler to manage the
